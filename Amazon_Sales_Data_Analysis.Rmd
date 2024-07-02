@@ -1,0 +1,411 @@
+---
+title: "Amazon_Sales_Data_analysis"
+author: "Saptorshi Mondal"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Objective
+
+Sales management has gained importance to meet increasing competition and the need for improved methods of distribution to reduce cost and to increase profits. Sales management today is the most important function in a commercial and business enterprise.
+
+Do ETL: Extract-Transform-Load some Amazon dataset and find for me Sales-trend -> month-wise, year-wise, yearly_month-wise
+
+Find key metrics and factors and show the meaningful relationships between attributes. Do your own research and come up with your findings.
+
+## Importing the Libraries
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+install.packages("remotes")
+remotes::install_cran(c("fansi", "utf8", "cli", "glue", "lifecycle", "magrittr", "pillar", "rlang", "tibble", "tidyselect", "vctrs"))
+library(fansi)
+library(utf8)
+library(cli)
+library(glue)
+library(lifecycle)
+library(magrittr)
+library(pillar)
+library(rlang)
+library(tibble)
+library(tidyselect)
+library(vctrs)
+```
+
+```{r}
+# Load necessary libraries for EDA
+library(dplyr)
+library(tidyr)
+library(readr)
+library(skimr)
+library(DataExplorer)
+
+# Load necessary libraries for Data Visualization
+library(ggplot2)
+library(plotly)
+library(cowplot)
+library(gridExtra)
+library(GGally)
+
+# Load necessary libraries for Machine Learning
+install.packages("future.apply")
+install.packages("caret")
+library(caret)
+library(randomForest)
+library(e1071)
+library(glmnet)
+library(xgboost)
+```
+## Importing the Dataset
+
+```{r}
+setwd("C:/Users/Saptorshi Mondal/Downloads")
+data <- read_csv("Amazon Sales data.csv")
+head(data)
+```
+```{r}
+shape <- dim(data)
+num_rows <- shape[1]
+num_columns <- shape[2]
+print(paste("Number of rows:", num_rows))
+print(paste("Number of columns:", num_columns))
+```
+There are 100 rows and 14 columns.
+
+## Data Preprocessing
+```{r}
+#null values in data
+
+colSums(is.na(data))
+```
+There are no null values in the data.
+```{r}
+#data set info
+str(data)
+```
+There are 7 numerical and 7 categorical columns.
+
+## Exploratory Data Analysis
+
+```{r}
+#value counts 
+install.packages("purrr")
+library(purrr)
+categorical_columns <- names(data)[sapply(data, is.factor) | sapply(data, is.character)]
+
+# Calculate unique values and percentages for each categorical column
+results <- lapply(categorical_columns, function(column) {
+  value_counts <- table(data[[column]])
+  value_percentages <- prop.table(value_counts) * 100
+
+  unique_values_data <- data.frame(Value = names(value_counts),
+                                   Count = as.numeric(value_counts),
+                                   Percentage =round(value_percentages,2))
+
+  return(unique_values_data)
+})
+
+# Print the results for each categorical column
+for (i in seq_along(results)) {
+  cat("Column:", categorical_columns[i], "\n")
+  print(results[[i]])
+  cat("\n")
+}
+```
+```{r}
+#summary
+
+summary(data)
+```
+### Univariate Analysis
+```{r}
+#bar graphs analysis
+ggplot(data, aes_string(x = "`Item Type`")) +
+  geom_bar() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  labs(title = "Bar Graph of Item Type", x = "Item Type", y = "Count") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+```
+```{r}
+ggplot(data, aes_string(x = "`Sales Channel`")) +
+  geom_bar() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  labs(title = "Bar Graph of Sales Channel", x = "Sales Channel", y = "Count") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+```
+```{r}
+ggplot(data, aes_string(x = "`Order Priority`")) +
+  geom_bar() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  labs(title = "Bar Graph of Order Priority", x = "Order Priority", y = "Count") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+```
+
+Most of the orders, belong to the 'Clothing' and 'Cosmetics' catgeory. Many of the orders are of 'high' priority. The amount of 'offline' and 'online' orders are equal.
+
+### Bivariate Analysis
+
+```{r}
+ggplot(data, aes(x = `Item Type`, y = `Total Profit` )) +
+  geom_boxplot() +
+  labs(x = "`Item Type`", y = "`Total Profit`", title = "Box Plot of Sales by Item Type") +
+  theme_minimal()
+```
+```{r}
+ggplot(data, aes(x = `Order Priority`, y = `Total Profit` )) +
+  geom_boxplot() +
+  labs(x = "`Order Priority`", y = "`Total Profit`", title = "Box Plot of Sales by Order Priroity") +
+  theme_minimal()
+```
+```{r}
+ggplot(data, aes(x = `Sales Channel`, y = `Total Profit` )) +
+  geom_boxplot() +
+  labs(x = "`Sales Channel`", y = "`Total Profit`", title = "Box Plot of Sales by Sales channel") +
+  theme_minimal()
+```
+```{r}
+install.packages("hexbin")
+library(hexbin)
+ggplot(data, aes(x = `Units Sold`, y = `Total Profit` )) +
+  geom_hex() +
+  labs(x = "`Units Sold`", y = "`Total Profit`", title = "Hexbin Plot of Sales by Units Sold") +
+  theme_minimal()
+```
+
+Cosmetics are the most profitable products. Most of the items have 'high' order priority. The 'offline' orders were highly profitable compared to 'online' based orders. Over 10000 single units, received the best profit.
+
+
+```{r}
+cat_cols <- c("Region", "Country","`Item Type`","`Sales Channel`","`Order Priority`","`Order Date`","`Ship Date`")
+# Function to perform label encoding
+label_encode <- function(df, cat_cols) {
+  for (col in cat_cols) {
+    if (col %in% colnames(df)) {
+      df[[col]] <- as.numeric(factor(df[[col]]))
+    } else {
+      stop(paste("Column", col, "not found in the dataframe"))
+    }
+  }
+  return(df)
+}
+# Apply label encoding
+new_df <- label_encode(data, categorical_columns)
+print(head(new_df))
+
+```
+```{r}
+colnames(new_df) <- make.names(colnames(new_df))
+
+# Function to create a boxplot for each numerical column in the dataframe
+create_boxplot <- function(column_name) {
+  ggplot(new_df, aes_string(x = "1", y = column_name)) +
+    geom_boxplot(outlier.colour = "red", outlier.shape = 16,
+                 outlier.size = 2, notch = FALSE) +
+    labs(title = paste("Boxplot for", column_name), x = column_name, y = "Values")
+}
+
+# Identify numerical columns
+numerical_cols <- sapply(new_df, is.numeric)
+
+# Create boxplots for each numerical column
+boxplots <- lapply(names(new_df)[numerical_cols], create_boxplot)
+
+# Print each boxplot
+for (plot in boxplots) {
+  print(plot)
+}
+```
+```{r}
+# Function to floor and cap outliers in a dataframe
+floor_cap_outliers <- function(df) {
+  for (col in names(df)) {
+    if (is.numeric(df[[col]])) {
+      Q1 <- quantile(df[[col]], 0.25, na.rm = TRUE)
+      Q3 <- quantile(df[[col]], 0.75, na.rm = TRUE)
+      IQR <- Q3 - Q1
+      lower_bound <- Q1 - 1.5 * IQR
+      upper_bound <- Q3 + 1.5 * IQR
+      
+      df[[col]] <- ifelse(df[[col]] < lower_bound, lower_bound, df[[col]])
+      df[[col]] <- ifelse(df[[col]] > upper_bound, upper_bound, df[[col]])
+    }
+  }
+  return(df)
+}
+
+# Floor and cap outliers in the sales dataframe
+new_df <- floor_cap_outliers(new_df)
+
+# Print the modified dataframe
+print(head(new_df))
+```
+```{r}
+cor_matrix <- cor(new_df[sapply(new_df, is.numeric)])
+print(cor_matrix)
+```
+```{r}
+library(reshape2)
+melted_cor_matrix <- melt(cor_matrix)
+
+# Plot the heatmap
+ggplot(data = melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1)) +
+  coord_fixed() +
+  ggtitle("Heatmap of Correlation Matrix")
+```
+
+The heatmap represents the correlation matrix visually.The 'red' represents positive correlation while 'blue' represents negative correlation. It is seen that the 'Total Revenue','Total cost', 'Units Sold','Unit cost' are all positively correlated with 'Total Profit' while the 'Item type', 'Sales Channel' and 'Region' are negatively correlated.
+
+### Model Building
+#### Supervised Learning
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+train_index <- createDataPartition(new_df$Total.Profit, p = 0.7, list = FALSE)
+train_data <- new_df[train_index, ]
+test_data <- new_df[-train_index, ]
+x_train <- as.matrix(train_data[ , !colnames(train_data) %in% "Total.Profit"])
+y_train <- train_data$Total.Profit
+x_test <- as.matrix(test_data[ , !colnames(test_data) %in% "Total.Profit"])
+y_test <- test_data$Total.Profit
+
+# Fit the linear model(base model)
+linear_model <- lm(Total.Profit ~ ., data = train_data)
+
+# View the model summary
+summary(linear_model)
+```
+```{r}
+linear_predictions <- predict(linear_model, test_data)
+test_mse <- mean((test_data$Total.Profit - linear_predictions)^2)
+train_mse <- mean((train_data$Total.Profit - linear_predictions)^2)
+print(paste("Test MSE:", test_mse))
+print(paste("Train MSE:", train_mse))
+if (train_mse > test_mse) {
+  print("The model is potentially overfitting.")
+} else if (train_mse < test_mse) {
+  print("The model is potentially underfitting.")
+} else {
+  print("The model is performing similarly on both training and validation sets.")
+}
+```
+```{r}
+#Ridge regression
+install.packages("glmnet")
+library(glmnet)
+install.packages("Metrics")
+library(Metrics)
+ridge_model <- glmnet(x_train, y_train, alpha = 0)
+train_predictions <- predict(ridge_model, newx = x_train)
+test_predictions <- predict(ridge_model, newx = x_test)
+train_mse <- mse(y_train, train_predictions)
+test_mse <- mse(y_test, test_predictions)
+print(paste("Train MSE:", train_mse))
+print(paste("Test MSE:", test_mse))
+if (train_mse > test_mse) {
+  print("The model is potentially overfitting.")
+} else if (train_mse < test_mse) {
+  print("The model is potentially underfitting.")
+} else {
+  print("The model is performing similarly on both training and validation sets.")
+}
+```
+```{r}
+#Lasso Model
+lasso_model <- glmnet(x_train, y_train, alpha = 1)
+train_predictions <- predict(lasso_model, newx = x_train)
+test_predictions <- predict(lasso_model, newx = x_test)
+train_mse <- mse(y_train, train_predictions)
+test_mse <- mse(y_test, test_predictions)
+print(paste("Train MSE:", train_mse))
+print(paste("Test MSE:", test_mse))
+if (train_mse > test_mse) {
+  print("The model is potentially overfitting.")
+} else if (train_mse < test_mse) {
+  print("The model is potentially underfitting.")
+} else {
+  print("The model is performing similarly on both training and validation sets.")
+}
+```
+```{r}
+# Random Forest Regression
+forest_model <- randomForest(Total.Profit ~ ., data = train_data)
+train_predictions <- predict(forest_model,x_train)
+test_predictions <- predict(forest_model,x_test)
+train_mse <- mse(y_train, train_predictions)
+test_mse <- mse(y_test, test_predictions)
+print(paste("Train MSE:", train_mse))
+print(paste("Test MSE:", test_mse))
+if (train_mse > test_mse) {
+  print("The model is potentially overfitting.")
+} else if (train_mse < test_mse) {
+  print("The model is potentially underfitting.")
+} else {
+  print("The model is performing similarly on both training and validation sets.")
+}
+```
+A good fit model is achieved with 'Ridge Regression' algorithm where, the train and test Mean Square error values are almost similar as compared to other models.
+
+#### Feature Selection
+
+```{r}
+install.packages("e1071")
+library(e1071)
+predictors <- new_df[, !colnames(new_df) %in% "Total.Profit"]
+target <- new_df$Total.Profit
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 10)
+results <- rfe(predictors, target, sizes = c(1:5, 10, 15, 20), rfeControl = control)
+print(results)
+```
+The optimum features are found in Recursive Factor elimination method. They are: Total.Revenue, Units.Sold, Total.Cost, Unit.Price, Item.Type respectively.
+
+### Unsupervised Learning
+
+```{r}
+library(cluster)
+install.packages("factoextra")
+library(factoextra)
+selected_features <- new_df [, c("Total.Revenue", "Units.Sold", "Total.Cost", "Unit.Price", "Item.Type")]
+scaled_features <- scale(selected_features)
+elbow_plot <- fviz_nbclust(scaled_features, kmeans, method = "wss")
+print(elbow_plot)
+```
+
+Using the Elbow Plot, it is determined that, the no. of clusters should be 2.
+
+```{r}
+k <- 2  # Number of clusters (adjust as needed)
+kmeans_model <- kmeans(scaled_features, centers = k, nstart = 20)  # Run k-means clustering
+cluster_labels <- kmeans_model$cluster 
+silhouette_score <- silhouette(cluster_labels, dist(scaled_features))
+print(silhouette_score)
+```
+
+```{r}
+clustered_data <- cbind(new_df, Cluster = cluster_labels)  # Add cluster labels to the original data
+ggplot(clustered_data, aes(x = Total.Profit, y = Units.Sold, color = factor(Cluster))) +
+  geom_point() +
+  labs(title = "K-Means Clustering of Sales Data", x = "Total Profit", y = "Units Sold") +
+  theme_minimal()
+```
+
+We are plotting 'Units sold' vs 'Total Profit', where the approximate no. of clusters equals to 2, Cluster 1 represents products with high units sold but low profit. Cluster 2 represents products with low units sold but high profit.
+
+
+
+
+
+
+
+
